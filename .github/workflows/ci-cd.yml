@@ -1,0 +1,350 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment (development|staging|production)
+        required: true
+        default: staging
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+env:
+  JAVA_VERSION: "21"
+  NODE_VERSION: "24"
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'staging' }}
+
+jobs:
+  build-and-test:
+    name: Build, test, scan, package
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_sha256: ${{ steps.digest.outputs.sha256 }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Backend test and package
+        working-directory: backend
+        run: mvn -B clean verify
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend install and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npx ng build --configuration=production
+
+      - name: Secret scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate env YAML against schema
+        run: |
+          pip install pyyaml jsonschema
+          python scripts/validate-config.py --env-dir deploy/env
+
+      - name: Create deployment artifact
+        id: package
+        run: |
+          mkdir -p artifacts
+          ARTIFACT_NAME="employee-management-service-${{ github.sha }}.tar.gz"
+          cp backend/target/employee-management-service-*.jar artifacts/
+          mkdir -p artifacts/frontend
+          if [ -d frontend/dist/frontend/browser ]; then
+            cp -r frontend/dist/frontend/browser/* artifacts/frontend/
+          elif [ -d frontend/dist/frontend ]; then
+            cp -r frontend/dist/frontend/* artifacts/frontend/
+          else
+            echo "ERROR: frontend dist not found" >&2
+            exit 1
+          fi
+          tar -czf "artifacts/${ARTIFACT_NAME}" -C artifacts \
+            $(ls artifacts/*.jar | xargs -n1 basename) frontend
+          echo "artifact_name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Packed ${ARTIFACT_NAME}"
+
+      - name: Compute SHA256 digest
+        id: digest
+        run: |
+          DIGEST=$(sha256sum "artifacts/${{ steps.package.outputs.artifact_name }}" | awk '{print $1}')
+          echo "sha256=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "${DIGEST}  ${{ steps.package.outputs.artifact_name }}" > "artifacts/${{ steps.package.outputs.artifact_name }}.sha256"
+          echo "Artifact SHA256: ${DIGEST}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            artifacts/${{ steps.package.outputs.artifact_name }}
+            artifacts/${{ steps.package.outputs.artifact_name }}.sha256
+          retention-days: 14
+
+  envguard-deploy-request:
+    name: EnvGuard deployment gate
+    needs: build-and-test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_id: ${{ steps.request.outputs.deployment_id }}
+      decision: ${{ steps.poll.outputs.decision }}
+    steps:
+      - name: Require EnvGuard secrets
+        run: |
+          if [ -z "${{ secrets.ENVGUARD_URL }}" ] || [ -z "${{ secrets.ENVGUARD_PIPELINE_TOKEN }}" ]; then
+            echo "ERROR: ENVGUARD_URL and ENVGUARD_PIPELINE_TOKEN must be configured as repository secrets." >&2
+            echo "Optional: ENVGUARD_PROJECT_ID (UUID). Falls back to projectName employee-management-service." >&2
+            exit 1
+          fi
+
+      - name: Register build + create EnvGuard deployment request
+        id: request
+        env:
+          ENVGUARD_URL: ${{ secrets.ENVGUARD_URL }}
+          ENVGUARD_PIPELINE_TOKEN: ${{ secrets.ENVGUARD_PIPELINE_TOKEN }}
+          ENVGUARD_PROJECT_ID: ${{ secrets.ENVGUARD_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          ENV_NAME="${{ env.DEPLOY_ENV }}"
+          CONFIG_FILE="deploy/env/${ENV_NAME}.yaml"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "ERROR: missing $CONFIG_FILE" >&2
+            exit 1
+          fi
+          COMMIT="${{ github.sha }}"
+          DIGEST="${{ needs.build-and-test.outputs.artifact_sha256 }}"
+          IDEMPOTENCY="gha-employee-${{ github.run_id }}-${{ github.run_attempt }}-${ENV_NAME}"
+          API="${ENVGUARD_URL%/}/api"
+          PROJECT_JSON=$(jq -n \
+            --arg id "${ENVGUARD_PROJECT_ID:-}" \
+            --arg name "employee-management-service" \
+            'if ($id|length) > 0 then {projectId:$id,projectName:$name} else {projectName:$name} end')
+
+          BUILD_BODY=$(jq -n \
+            --argjson proj "$PROJECT_JSON" \
+            --arg sha "$COMMIT" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg run "${{ github.run_id }}" \
+            --arg digest "$DIGEST" \
+            '$proj + {commitSha:$sha,branch:$branch,pipelineRunId:$run,artifactDigest:$digest,status:"SUCCEEDED"}')
+          curl -fsS -X POST "${API}/pipeline/builds" \
+            -H "Content-Type: application/json" \
+            -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
+            -d "${BUILD_BODY}"
+
+          DEPLOY_BODY=$(jq -n \
+            --argjson proj "$PROJECT_JSON" \
+            --arg env "$ENV_NAME" \
+            --arg sha "$COMMIT" \
+            --arg digest "$DIGEST" \
+            --arg run "${{ github.run_id }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg actor "github-actions:${{ github.actor }}" \
+            --arg key "$IDEMPOTENCY" \
+            --arg yaml "$(cat "$CONFIG_FILE")" \
+            '$proj + {
+              environment:$env,
+              commitSha:$sha,
+              artifactDigest:$digest,
+              pipelineRunId:$run,
+              branch:$branch,
+              requesterIdentity:$actor,
+              idempotencyKey:$key,
+              configYaml:$yaml
+            }')
+          RESP=$(curl -fsS -X POST "${API}/pipeline/deployments" \
+            -H "Content-Type: application/json" \
+            -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
+            -d "${DEPLOY_BODY}")
+          echo "Response: ${RESP}"
+          ID=$(echo "${RESP}" | jq -r '.data.id // .id // empty')
+          if [ -z "${ID}" ] || [ "${ID}" = "null" ]; then
+            echo "ERROR: EnvGuard did not return a deployment id" >&2
+            exit 1
+          fi
+          echo "deployment_id=${ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Poll EnvGuard deployment status
+        id: poll
+        env:
+          ENVGUARD_URL: ${{ secrets.ENVGUARD_URL }}
+          ENVGUARD_PIPELINE_TOKEN: ${{ secrets.ENVGUARD_PIPELINE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ID="${{ steps.request.outputs.deployment_id }}"
+          API="${ENVGUARD_URL%/}/api"
+          DECISION=""
+          for i in $(seq 1 120); do
+            RESP=$(curl -fsS \
+              -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
+              "${API}/pipeline/deployments/${ID}/status")
+            STATUS=$(echo "${RESP}" | jq -r '.data.status // .status // empty')
+            echo "poll ${i}: status=${STATUS}"
+            case "${STATUS}" in
+              APPROVED)
+                DECISION="APPROVED"
+                break
+                ;;
+              REJECTED|TIMED_OUT|FAILED|INVALIDATED)
+                DECISION="${STATUS}"
+                break
+                ;;
+              READY_FOR_APPROVAL|DEPLOYING|"")
+                sleep 30
+                ;;
+              *)
+                echo "Waiting on status: ${STATUS}" >&2
+                sleep 30
+                ;;
+            esac
+          done
+          if [ -z "${DECISION}" ]; then
+            echo "ERROR: Timed out waiting for EnvGuard decision" >&2
+            exit 1
+          fi
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          echo "EnvGuard decision: ${DECISION}"
+          if [ "${DECISION}" != "APPROVED" ]; then
+            echo "ERROR: Deployment ${DECISION} — aborting" >&2
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to EC2 (AWS OIDC)
+    needs: [build-and-test, envguard-deploy-request]
+    if: needs.envguard-deploy-request.outputs.decision == 'APPROVED'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: artifacts
+
+      - name: Verify artifact checksum
+        run: |
+          set -euo pipefail
+          ARTIFACT="${{ needs.build-and-test.outputs.artifact_name }}"
+          EXPECTED="${{ needs.build-and-test.outputs.artifact_sha256 }}"
+          ACTUAL=$(sha256sum "artifacts/${ARTIFACT}" | awk '{print $1}')
+          echo "Expected: ${EXPECTED}"
+          echo "Actual:   ${ACTUAL}"
+          if [ "${EXPECTED}" != "${ACTUAL}" ]; then
+            echo "ERROR: Artifact digest mismatch — refusing deploy" >&2
+            exit 1
+          fi
+          if [ -f "artifacts/${ARTIFACT}.sha256" ]; then
+            sha256sum -c "artifacts/${ARTIFACT}.sha256"
+          fi
+
+      - name: Require AWS deploy configuration
+        id: aws_check
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ] || [ -z "${{ secrets.EC2_INSTANCE_ID }}" ] || [ -z "${{ secrets.AWS_REGION }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "ERROR: AWS deploy secrets not configured." >&2
+            echo "Required repository secrets: AWS_ROLE_ARN, EC2_INSTANCE_ID, AWS_REGION" >&2
+            echo "Optional: ARTIFACT_S3_BUCKET for uploading the release bundle." >&2
+            echo "EnvGuard approved the deployment, but AWS OIDC/EC2 deploy cannot proceed without secrets." >&2
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Placeholder — retrieve secrets from Secrets Manager
+        run: |
+          set -euo pipefail
+          echo "Retrieving secret references from deploy/env/${{ env.DEPLOY_ENV }}.yaml (paths only; values not logged)"
+          DB_REF=$(python - <<'PY'
+          import yaml
+          from pathlib import Path
+          cfg = yaml.safe_load(Path("deploy/env/${{ env.DEPLOY_ENV }}.yaml").read_text())
+          print(cfg["secretReferences"]["dbPassword"])
+          PY
+          )
+          echo "DB password secret ref: ${DB_REF}"
+          # Values are fetched for runtime injection only; never echo secret values.
+          aws secretsmanager get-secret-value --secret-id "${DB_REF}" --query ARN --output text >/dev/null
+          echo "Secret ARN resolved (value not printed)"
+
+      - name: Upload artifact to S3
+        id: s3
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.ARTIFACT_S3_BUCKET }}" ]; then
+            echo "ERROR: ARTIFACT_S3_BUCKET secret is required for EC2 deploy via SSM" >&2
+            exit 1
+          fi
+          KEY="employee-management-service/${{ github.sha }}/${{ needs.build-and-test.outputs.artifact_name }}"
+          URI="s3://${{ secrets.ARTIFACT_S3_BUCKET }}/${KEY}"
+          aws s3 cp "artifacts/${{ needs.build-and-test.outputs.artifact_name }}" "${URI}"
+          echo "s3_uri=${URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSM / systemd
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          ARTIFACT_S3_URI: ${{ steps.s3.outputs.s3_uri }}
+          ARTIFACT_SHA256: ${{ needs.build-and-test.outputs.artifact_sha256 }}
+          DEPLOY_ENV: ${{ env.DEPLOY_ENV }}
+        run: |
+          chmod +x scripts/deploy-ec2.sh
+          ./scripts/deploy-ec2.sh
+
+      - name: Health check after deploy
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.DEPLOY_HEALTH_URL }}" ]; then
+            echo "ERROR: DEPLOY_HEALTH_URL not configured — cannot verify post-deploy health" >&2
+            exit 1
+          fi
+          for i in $(seq 1 30); do
+            if curl -fsS "${{ secrets.DEPLOY_HEALTH_URL }}" | tee /tmp/health.json; then
+              grep -q '"status"[[:space:]]*:[[:space:]]*"UP"' /tmp/health.json && exit 0
+            fi
+            echo "Health check attempt ${i} failed; retrying..."
+            sleep 5
+          done
+          echo "ERROR: Health check failed after deploy" >&2
+          exit 1

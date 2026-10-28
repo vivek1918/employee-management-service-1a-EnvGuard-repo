@@ -1,0 +1,11 @@
+environment: staging
+application:
+  port: 8081
+  logLevel: INFO
+database:
+  host: localhost
+  port: 3306
+  name: employee_db
+secretReferences:
+  dbPassword: employee-service/staging/db-password
+  jwtSecret: employee-service/staging/jwt-secret

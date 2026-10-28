@@ -1,0 +1,11 @@
+environment: development
+application:
+  port: 8081
+  logLevel: DEBUG
+database:
+  host: localhost
+  port: 3307
+  name: employee_db
+secretReferences:
+  dbPassword: employee-service/development/db-password
+  jwtSecret: employee-service/development/jwt-secret

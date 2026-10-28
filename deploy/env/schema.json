@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://employee-management-service.local/deploy/env/schema.json",
+  "title": "EmployeeManagementServiceEnvConfig",
+  "type": "object",
+  "required": ["environment", "application", "database", "secretReferences"],
+  "additionalProperties": false,
+  "properties": {
+    "environment": {
+      "type": "string",
+      "enum": ["development", "staging", "production"]
+    },
+    "application": {
+      "type": "object",
+      "required": ["port", "logLevel"],
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "required": ["host", "port", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "secretReferences": {
+      "type": "object",
+      "required": ["dbPassword", "jwtSecret"],
+      "additionalProperties": false,
+      "properties": {
+        "dbPassword": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secrets Manager reference path for DB password (non-secret)"
+        },
+        "jwtSecret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Secrets Manager reference path for JWT secret (non-secret)"
+        }
+      }
+    }
+  }
+}

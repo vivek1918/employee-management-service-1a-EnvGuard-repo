@@ -1,0 +1,46 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+credentials*
+**/credentials*
+**/secrets*
+*.secret
+
+# Java / Maven
+backend/target/
+**/target/
+*.class
+*.jar
+*.war
+!**/src/**/resources/**
+
+# Node / Angular
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+**/node_modules/
+**/dist/
+.npm
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*~
+
+# Build artifacts
+artifacts/
+*.sha256
+coverage/

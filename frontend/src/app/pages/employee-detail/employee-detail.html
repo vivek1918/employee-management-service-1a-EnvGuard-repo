@@ -1,0 +1,71 @@
+<section class="page narrow">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">Profile</p>
+      <h1>{{ employee?.fullName || 'Employee' }}</h1>
+      <p class="lede">View record details and manage updates.</p>
+    </div>
+    <a class="btn btn-ghost" routerLink="/employees">Back to list</a>
+  </header>
+
+  @if (errorMessage) {
+    <div class="banner banner-error" role="alert">{{ errorMessage }}</div>
+  }
+
+  @if (loading) {
+    <div class="state">Loading employee…</div>
+  } @else if (employee) {
+    <article class="detail-panel">
+      <dl>
+        <div>
+          <dt>Full name</dt>
+          <dd>{{ employee.fullName }}</dd>
+        </div>
+        <div>
+          <dt>Email</dt>
+          <dd>{{ employee.email }}</dd>
+        </div>
+        <div>
+          <dt>Department</dt>
+          <dd>{{ employee.department }}</dd>
+        </div>
+        <div>
+          <dt>Designation</dt>
+          <dd>{{ employee.designation }}</dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>{{ employee.createdAt | date: 'medium' }}</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>{{ employee.updatedAt | date: 'medium' }}</dd>
+        </div>
+      </dl>
+
+      <div class="detail-actions">
+        <a class="btn btn-primary" [routerLink]="['/employees', employee.id, 'edit']">Edit</a>
+        <button type="button" class="btn btn-danger" (click)="confirmDelete()">Delete</button>
+      </div>
+    </article>
+  }
+</section>
+
+@if (showDeleteConfirm && employee) {
+  <div class="modal-backdrop" (click)="cancelDelete()">
+    <div class="modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+      <h2>Delete employee?</h2>
+      <p>
+        Remove <strong>{{ employee.fullName }}</strong> permanently. This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" [disabled]="deleting" (click)="cancelDelete()">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-danger" [disabled]="deleting" (click)="performDelete()">
+          {{ deleting ? 'Deleting…' : 'Delete' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

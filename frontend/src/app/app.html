@@ -1,0 +1,25 @@
+<div class="shell">
+  <header class="topbar">
+    <a class="brand" routerLink="/employees">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">
+        <strong>PeopleOps</strong>
+        <small>Employee Management</small>
+      </span>
+    </a>
+    <nav>
+      <a routerLink="/employees" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        Directory
+      </a>
+      <a routerLink="/employees/new" routerLinkActive="active">Add</a>
+    </nav>
+  </header>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+
+  <footer class="footer">
+    <span>PeopleOps · local API on port 8081</span>
+  </footer>
+</div>

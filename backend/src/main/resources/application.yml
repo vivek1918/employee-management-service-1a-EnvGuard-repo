@@ -1,0 +1,41 @@
+server:
+  port: ${APP_PORT:8081}
+
+spring:
+  application:
+    name: employee-management-service
+  data:
+    web:
+      pageable:
+        default-page-size: 10
+        max-page-size: 100
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3307}/${DB_NAME:employee_db}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USER:employee}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    com.employee: ${LOG_LEVEL:INFO}

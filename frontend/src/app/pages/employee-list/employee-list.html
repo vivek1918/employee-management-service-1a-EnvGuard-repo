@@ -1,0 +1,119 @@
+<section class="page">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">Directory</p>
+      <h1>Employees</h1>
+      <p class="lede">Search, filter, and manage your team records.</p>
+    </div>
+    <a class="btn btn-primary" routerLink="/employees/new">Add employee</a>
+  </header>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span>Search</span>
+      <input
+        type="search"
+        [(ngModel)]="searchQuery"
+        (keyup.enter)="onSearch()"
+        placeholder="Name, email, or designation"
+      />
+    </label>
+    <label class="field">
+      <span>Department</span>
+      <select [(ngModel)]="departmentFilter" (change)="onSearch()">
+        <option value="">All departments</option>
+        @for (dept of departments; track dept) {
+          <option [value]="dept">{{ dept }}</option>
+        }
+      </select>
+    </label>
+    <div class="toolbar-actions">
+      <button type="button" class="btn btn-secondary" (click)="onSearch()">Apply</button>
+      <button type="button" class="btn btn-ghost" (click)="clearFilters()">Clear</button>
+    </div>
+  </div>
+
+  @if (errorMessage) {
+    <div class="banner banner-error" role="alert">{{ errorMessage }}</div>
+  }
+
+  @if (loading) {
+    <div class="state">Loading employees…</div>
+  } @else if (employees.length === 0) {
+    <div class="state">
+      No employees found.
+      <a routerLink="/employees/new">Create the first one</a>
+    </div>
+  } @else {
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Department</th>
+            <th>Designation</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (employee of employees; track employee.id) {
+            <tr>
+              <td>
+                <a [routerLink]="['/employees', employee.id]">{{ employee.fullName }}</a>
+              </td>
+              <td>{{ employee.email }}</td>
+              <td>{{ employee.department }}</td>
+              <td>{{ employee.designation }}</td>
+              <td>{{ employee.updatedAt | date: 'mediumDate' }}</td>
+              <td class="row-actions">
+                <a class="link" [routerLink]="['/employees', employee.id, 'edit']">Edit</a>
+                <button type="button" class="link danger" (click)="confirmDelete(employee)">
+                  Delete
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pager">
+      <span>{{ totalElements }} total · page {{ page + 1 }} of {{ totalPages || 1 }}</span>
+      <div class="pager-actions">
+        <button type="button" class="btn btn-ghost" [disabled]="page === 0" (click)="prevPage()">
+          Previous
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost"
+          [disabled]="page + 1 >= totalPages"
+          (click)="nextPage()"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+@if (deleteTarget) {
+  <div class="modal-backdrop" (click)="cancelDelete()">
+    <div class="modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+      <h2>Delete employee?</h2>
+      <p>
+        Remove <strong>{{ deleteTarget.fullName }}</strong> ({{ deleteTarget.email }}) permanently.
+        This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" [disabled]="deleting" (click)="cancelDelete()">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-danger" [disabled]="deleting" (click)="performDelete()">
+          {{ deleting ? 'Deleting…' : 'Delete' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

@@ -1,0 +1,11 @@
+environment: production
+application:
+  port: 8081
+  logLevel: WARN
+database:
+  host: employee-db.internal
+  port: 3306
+  name: employee_db
+secretReferences:
+  dbPassword: employee-service/production/db-password
+  jwtSecret: employee-service/production/jwt-secret

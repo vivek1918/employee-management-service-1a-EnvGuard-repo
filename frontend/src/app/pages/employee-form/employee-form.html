@@ -1,0 +1,64 @@
+<section class="page narrow">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">{{ isEdit ? 'Update' : 'Create' }}</p>
+      <h1>{{ isEdit ? 'Edit employee' : 'New employee' }}</h1>
+      <p class="lede">All fields are required. Email must be unique.</p>
+    </div>
+    <a class="btn btn-ghost" routerLink="/employees">Back to list</a>
+  </header>
+
+  @if (errorMessage) {
+    <div class="banner banner-error" role="alert">{{ errorMessage }}</div>
+  }
+
+  @if (loading) {
+    <div class="state">Loading employee…</div>
+  } @else {
+    <form class="form-panel" [formGroup]="form" (ngSubmit)="submit()">
+      <label class="field">
+        <span>Full name</span>
+        <input type="text" formControlName="fullName" autocomplete="name" />
+        @if (controlError('fullName'); as msg) {
+          <small class="error">{{ msg }}</small>
+        }
+      </label>
+
+      <label class="field">
+        <span>Email</span>
+        <input type="email" formControlName="email" autocomplete="email" />
+        @if (controlError('email'); as msg) {
+          <small class="error">{{ msg }}</small>
+        }
+      </label>
+
+      <label class="field">
+        <span>Department</span>
+        <select formControlName="department">
+          <option value="" disabled>Select department</option>
+          @for (dept of departments; track dept) {
+            <option [value]="dept">{{ dept }}</option>
+          }
+        </select>
+        @if (controlError('department'); as msg) {
+          <small class="error">{{ msg }}</small>
+        }
+      </label>
+
+      <label class="field">
+        <span>Designation</span>
+        <input type="text" formControlName="designation" placeholder="e.g. Software Engineer" />
+        @if (controlError('designation'); as msg) {
+          <small class="error">{{ msg }}</small>
+        }
+      </label>
+
+      <div class="form-actions">
+        <a class="btn btn-ghost" routerLink="/employees">Cancel</a>
+        <button type="submit" class="btn btn-primary" [disabled]="saving">
+          {{ saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create employee' }}
+        </button>
+      </div>
+    </form>
+  }
+</section>
