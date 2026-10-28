@@ -344,7 +344,7 @@ jobs:
           import yaml
           from pathlib import Path
           cfg = yaml.safe_load(Path("deploy/env/${{ env.DEPLOY_ENV }}.yaml").read_text())
-          print(cfg["secretReferences"]["dbPassword"])
+          print(cfg["secretReferences"]["DB_PASSWORD"])
           PY
           )
           echo "DB password secret ref: ${DB_REF}"

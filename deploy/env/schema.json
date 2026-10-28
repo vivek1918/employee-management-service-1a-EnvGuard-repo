@@ -48,15 +48,19 @@
     },
     "secretReferences": {
       "type": "object",
-      "required": ["dbPassword", "jwtSecret"],
+      "required": ["DB_PASSWORD", "JWT_SECRET"],
       "additionalProperties": false,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
       "properties": {
-        "dbPassword": {
+        "DB_PASSWORD": {
           "type": "string",
           "minLength": 1,
           "description": "Secrets Manager reference path for DB password (non-secret)"
         },
-        "jwtSecret": {
+        "JWT_SECRET": {
           "type": "string",
           "minLength": 1,
           "description": "Secrets Manager reference path for JWT secret (non-secret)"

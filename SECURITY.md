@@ -14,8 +14,8 @@ Example reference (safe to commit):
 
 ```yaml
 secretReferences:
-  dbPassword: employee-service/staging/db-password
-  jwtSecret: employee-service/staging/jwt-secret
+  DB_PASSWORD: employee-service/staging/db-password
+  JWT_SECRET: employee-service/staging/jwt-secret
 ```
 
 Local development uses a `.env` file copied from `.env.example`. `.env` is gitignored.
