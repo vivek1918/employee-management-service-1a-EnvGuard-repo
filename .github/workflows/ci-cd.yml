@@ -147,7 +147,12 @@ jobs:
           COMMIT="${{ github.sha }}"
           DIGEST="${{ needs.build-and-test.outputs.artifact_sha256 }}"
           IDEMPOTENCY="gha-employee-${{ github.run_id }}-${{ github.run_attempt }}-${ENV_NAME}"
-          API="${ENVGUARD_URL%/}/api"
+          # ENVGUARD_URL must be the origin (e.g. http://host). Strip trailing /api so a
+          # mis-set secret does not become /api/api (JWT 401 instead of pipeline auth).
+          BASE="${ENVGUARD_URL%/}"
+          BASE="${BASE%/api}"
+          API="${BASE}/api"
+          echo "EnvGuard API base: ${API}"
           PROJECT_JSON=$(jq -n \
             --arg id "${ENVGUARD_PROJECT_ID:-}" \
             --arg name "employee-management-service" \
@@ -205,7 +210,9 @@ jobs:
         run: |
           set -euo pipefail
           ID="${{ steps.request.outputs.deployment_id }}"
-          API="${ENVGUARD_URL%/}/api"
+          BASE="${ENVGUARD_URL%/}"
+          BASE="${BASE%/api}"
+          API="${BASE}/api"
           DECISION=""
           for i in $(seq 1 120); do
             RESP=$(curl -fsS \
