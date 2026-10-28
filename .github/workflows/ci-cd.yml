@@ -119,6 +119,9 @@ jobs:
       deployment_id: ${{ steps.request.outputs.deployment_id }}
       decision: ${{ steps.poll.outputs.decision }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Require EnvGuard secrets
         run: |
           if [ -z "${{ secrets.ENVGUARD_URL }}" ] || [ -z "${{ secrets.ENVGUARD_PIPELINE_TOKEN }}" ]; then
