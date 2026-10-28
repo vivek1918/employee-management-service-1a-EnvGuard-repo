@@ -144,6 +144,13 @@ jobs:
             echo "ERROR: missing $CONFIG_FILE" >&2
             exit 1
           fi
+          # Trim CR/LF/whitespace — GitHub secrets often pick up a trailing newline on paste.
+          ENVGUARD_PIPELINE_TOKEN="$(printf '%s' "${ENVGUARD_PIPELINE_TOKEN}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "${ENVGUARD_PIPELINE_TOKEN}" ]; then
+            echo "ERROR: ENVGUARD_PIPELINE_TOKEN is empty after trim" >&2
+            exit 1
+          fi
+          echo "Pipeline token length after trim: ${#ENVGUARD_PIPELINE_TOKEN}"
           COMMIT="${{ github.sha }}"
           DIGEST="${{ needs.build-and-test.outputs.artifact_sha256 }}"
           IDEMPOTENCY="gha-employee-${{ github.run_id }}-${{ github.run_attempt }}-${ENV_NAME}"
@@ -158,6 +165,29 @@ jobs:
             --arg name "employee-management-service" \
             'if ($id|length) > 0 then {projectId:$id,projectName:$name} else {projectName:$name} end')
 
+          eg_curl() {
+            local method="$1" path="$2" body="${3:-}"
+            local tmp http
+            tmp="$(mktemp)"
+            if [ -n "${body}" ]; then
+              http=$(curl -sS -o "${tmp}" -w "%{http_code}" -X "${method}" "${API}${path}" \
+                -H "Content-Type: application/json" \
+                -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
+                -d "${body}" || true)
+            else
+              http=$(curl -sS -o "${tmp}" -w "%{http_code}" -X "${method}" "${API}${path}" \
+                -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" || true)
+            fi
+            if [ "${http}" -lt 200 ] || [ "${http}" -ge 300 ]; then
+              echo "ERROR: EnvGuard ${method} ${path} -> HTTP ${http}" >&2
+              echo "Response body: $(cat "${tmp}")" >&2
+              rm -f "${tmp}"
+              exit 1
+            fi
+            cat "${tmp}"
+            rm -f "${tmp}"
+          }
+
           BUILD_BODY=$(jq -n \
             --argjson proj "$PROJECT_JSON" \
             --arg sha "$COMMIT" \
@@ -165,10 +195,7 @@ jobs:
             --arg run "${{ github.run_id }}" \
             --arg digest "$DIGEST" \
             '$proj + {commitSha:$sha,branch:$branch,pipelineRunId:$run,artifactDigest:$digest,status:"SUCCEEDED"}')
-          curl -fsS -X POST "${API}/pipeline/builds" \
-            -H "Content-Type: application/json" \
-            -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
-            -d "${BUILD_BODY}"
+          eg_curl POST /pipeline/builds "${BUILD_BODY}" >/dev/null
 
           DEPLOY_BODY=$(jq -n \
             --argjson proj "$PROJECT_JSON" \
@@ -190,10 +217,7 @@ jobs:
               idempotencyKey:$key,
               configYaml:$yaml
             }')
-          RESP=$(curl -fsS -X POST "${API}/pipeline/deployments" \
-            -H "Content-Type: application/json" \
-            -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
-            -d "${DEPLOY_BODY}")
+          RESP=$(eg_curl POST /pipeline/deployments "${DEPLOY_BODY}")
           echo "Response: ${RESP}"
           ID=$(echo "${RESP}" | jq -r '.data.id // .id // empty')
           if [ -z "${ID}" ] || [ "${ID}" = "null" ]; then
@@ -210,14 +234,24 @@ jobs:
         run: |
           set -euo pipefail
           ID="${{ steps.request.outputs.deployment_id }}"
+          ENVGUARD_PIPELINE_TOKEN="$(printf '%s' "${ENVGUARD_PIPELINE_TOKEN}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           BASE="${ENVGUARD_URL%/}"
           BASE="${BASE%/api}"
           API="${BASE}/api"
           DECISION=""
           for i in $(seq 1 120); do
-            RESP=$(curl -fsS \
+            tmp="$(mktemp)"
+            http=$(curl -sS -o "${tmp}" -w "%{http_code}" \
               -H "X-EnvGuard-Pipeline-Token: ${ENVGUARD_PIPELINE_TOKEN}" \
-              "${API}/pipeline/deployments/${ID}/status")
+              "${API}/pipeline/deployments/${ID}/status" || true)
+            if [ "${http}" -lt 200 ] || [ "${http}" -ge 300 ]; then
+              echo "ERROR: EnvGuard status poll -> HTTP ${http}" >&2
+              echo "Response body: $(cat "${tmp}")" >&2
+              rm -f "${tmp}"
+              exit 1
+            fi
+            RESP=$(cat "${tmp}")
+            rm -f "${tmp}"
             STATUS=$(echo "${RESP}" | jq -r '.data.status // .status // empty')
             echo "poll ${i}: status=${STATUS}"
             case "${STATUS}" in
