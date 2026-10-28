@@ -306,15 +306,31 @@ jobs:
           set -euo pipefail
           ARTIFACT="${{ needs.build-and-test.outputs.artifact_name }}"
           EXPECTED="${{ needs.build-and-test.outputs.artifact_sha256 }}"
-          ACTUAL=$(sha256sum "artifacts/${ARTIFACT}" | awk '{print $1}')
+          # download-artifact@v4 may flatten or keep the artifacts/ prefix — locate the tarball.
+          if [ -f "artifacts/${ARTIFACT}" ]; then
+            ARTIFACT_PATH="artifacts/${ARTIFACT}"
+          elif [ -f "${ARTIFACT}" ]; then
+            ARTIFACT_PATH="${ARTIFACT}"
+          else
+            echo "ERROR: Artifact not found after download. Workspace:" >&2
+            find . -name '*.tar.gz' -o -name '*.sha256' | head -50 >&2 || true
+            exit 1
+          fi
+          ACTUAL=$(sha256sum "${ARTIFACT_PATH}" | awk '{print $1}')
           echo "Expected: ${EXPECTED}"
           echo "Actual:   ${ACTUAL}"
+          echo "Path:     ${ARTIFACT_PATH}"
           if [ "${EXPECTED}" != "${ACTUAL}" ]; then
             echo "ERROR: Artifact digest mismatch — refusing deploy" >&2
             exit 1
           fi
-          if [ -f "artifacts/${ARTIFACT}.sha256" ]; then
-            sha256sum -c "artifacts/${ARTIFACT}.sha256"
+          # .sha256 lists the basename only — verify from that file's directory.
+          SUM_FILE="${ARTIFACT_PATH}.sha256"
+          if [ -f "${SUM_FILE}" ]; then
+            (
+              cd "$(dirname "${ARTIFACT_PATH}")"
+              sha256sum -c "$(basename "${SUM_FILE}")"
+            )
           fi
 
       - name: Require AWS deploy configuration
